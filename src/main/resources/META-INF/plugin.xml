@@ -8,7 +8,7 @@
   <name>Codex Launcher</name>
 
   <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-  <vendor url="https://x0x0b.github.io/">x0x0b</vendor>
+  <vendor>liguanyu</vendor>
 
   <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
        Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
