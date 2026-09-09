@@ -51,6 +51,10 @@
         </ul>
     ]]></description>
 
+  <change-notes><![CDATA[
+    Insert selected editor text with its file path and line range into Codex as a multiline paste, without submitting.
+  ]]></change-notes>
+
   <!-- Product and plugin compatibility requirements.
        Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
   <depends>com.intellij.modules.platform</depends>
@@ -83,8 +87,8 @@
     </action>
     <action id="com.github.x0x0b.codexlauncher.sendRange"
       class="com.github.x0x0b.codexlauncher.actions.SendRangeToCodexAction"
-      text="Send Selection/Class to Codex"
-      description="Send the current selection or enclosing class lines to the Codex terminal"
+      text="Send File or Selection to Codex"
+      description="Insert the current file path, or its line range and selected text, into Codex"
       icon="icons/codex_active.svg">
       <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="Copy"/>
       <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>

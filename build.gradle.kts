@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.x0x0b"
-version = "1.1.17"
+version = "1.1.18"
 
 repositories {
     mavenCentral()
@@ -21,6 +21,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.14.0")
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("junit:junit:4.13.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.junit.vintage:junit-vintage-engine")
     intellijPlatform {
@@ -37,7 +38,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            Add support for GPT-5.6 Sol, Terra, and Luna models.
+            Insert selected editor text with its file path and line range into Codex as a multiline paste, without submitting.
         """.trimIndent()
     }
     publishing {

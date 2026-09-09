@@ -22,16 +22,23 @@ object InsertPayloadResolver {
         val relativePath = resolveRelativePath(project, targetFile) ?: return null
 
         val targetEditor = editor ?: editorManager.selectedTextEditor
-        val lineRange = targetEditor?.let { resolveSelectionLineRange(it) }
+        val selection = targetEditor?.selectionModel
+        val selectedText = selection?.takeIf { it.hasSelection() }?.selectedText?.takeIf { it.isNotEmpty() }
+        val lineRange = if (targetEditor != null && selection != null && selectedText != null) {
+            toLineRange(targetEditor.document, selection.selectionStart, selection.selectionEnd)
+                ?: return null
+        } else {
+            null
+        }
 
-        return InsertPayload(relativePath, lineRange)
+        return InsertPayload(relativePath, lineRange, selectedText)
     }
 
     fun formatInsertText(payload: InsertPayload): String {
         return buildString {
             append(payload.relativePath)
             payload.lineRange?.let { range ->
-                append(':')
+                append(": ")
                 append(range.start)
                 range.end?.takeIf { it != range.start }?.let { end ->
                     append('-')
@@ -39,6 +46,10 @@ object InsertPayloadResolver {
                 }
             }
             append(' ')
+            payload.selectedText?.let {
+                append(it)
+                append('\n')
+            }
         }
     }
 
@@ -55,15 +66,6 @@ object InsertPayloadResolver {
         }
     }
 
-    private fun resolveSelectionLineRange(editor: Editor): LineRange? {
-        val selectionModel = editor.selectionModel
-        if (!selectionModel.hasSelection() || selectionModel.selectedText.isNullOrEmpty()) {
-            return null
-        }
-
-        return toLineRange(editor.document, selectionModel.selectionStart, selectionModel.selectionEnd)
-    }
-
     private fun toLineRange(document: Document, startOffset: Int, endOffset: Int): LineRange? {
         if (startOffset < 0 || endOffset < startOffset) {
             return null
@@ -76,7 +78,6 @@ object InsertPayloadResolver {
 
         val adjustedEnd = when {
             endOffset <= startOffset -> startOffset
-            endOffset == document.textLength -> endOffset
             else -> endOffset - 1
         }
 
@@ -91,6 +92,11 @@ object InsertPayloadResolver {
     }
 }
 
-data class InsertPayload(val relativePath: String, val lineRange: LineRange?)
+/** File context to insert, including the exact editor text when a selection exists. */
+data class InsertPayload(
+    val relativePath: String,
+    val lineRange: LineRange?,
+    val selectedText: String? = null,
+)
 
 data class LineRange(val start: Int, val end: Int?)

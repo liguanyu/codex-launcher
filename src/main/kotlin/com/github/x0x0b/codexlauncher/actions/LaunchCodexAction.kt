@@ -23,8 +23,8 @@ class LaunchCodexAction : AnAction(DEFAULT_TEXT, DEFAULT_DESCRIPTION, null), Dum
         private const val NOTIFICATION_TITLE = "Codex Launcher"
         private const val DEFAULT_TEXT = "Launch Codex"
         private const val DEFAULT_DESCRIPTION = "Open a Codex terminal"
-        private const val ACTIVE_TEXT = "Insert File Path into Codex"
-        private const val ACTIVE_DESCRIPTION = "Send the current file path to the Codex terminal"
+        private const val ACTIVE_TEXT = "Insert File or Selection into Codex"
+        private const val ACTIVE_DESCRIPTION = "Insert the current file path, or its line range and selected text, into Codex"
         private val DEFAULT_ICON = IconLoader.getIcon("/icons/codex.svg", LaunchCodexAction::class.java)
         private val ACTIVE_ICON = IconLoader.getIcon("/icons/codex_active.svg", LaunchCodexAction::class.java)
     }
@@ -66,12 +66,15 @@ class LaunchCodexAction : AnAction(DEFAULT_TEXT, DEFAULT_DESCRIPTION, null), Dum
 
         val insertText = InsertPayloadResolver.formatInsertText(payload)
 
-        if (!terminalManager.typeIntoActiveCodexTerminal(insertText)) {
-            notify(project, "Failed to send file path to Codex terminal", NotificationType.WARNING)
+        if (!terminalManager.typeIntoActiveCodexTerminal(insertText, asPaste = payload.selectedText != null)) {
+            notify(project, "Failed to insert file context into Codex; selection paste requires a compatible terminal", NotificationType.WARNING)
             return
         }
 
-        logger.info("Sent active file path to Codex terminal: $insertText")
+        logger.info(
+            "Sent file context to Codex: path=${payload.relativePath}, " +
+                "range=${payload.lineRange}, selectedChars=${payload.selectedText?.length ?: 0}",
+        )
     }
 
     private fun launchCodex(project: Project, terminalManager: CodexTerminalManager) {

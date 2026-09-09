@@ -84,11 +84,12 @@ class CodexTerminalManager(private val project: Project) {
         }
     }
 
-    fun typeIntoActiveCodexTerminal(text: String): Boolean {
+    /** Inserts text; selection payloads use bracketed paste to keep newlines inside the draft. */
+    fun typeIntoActiveCodexTerminal(text: String, asPaste: Boolean = false): Boolean {
         return try {
             val terminalManager = TerminalToolWindowManager.getInstance(project)
             val terminal = findDisplayedCodexTerminal(terminalManager) ?: return false
-            typeText(terminal.widget, text)
+            if (asPaste) pasteText(terminal.widget, text) else typeText(terminal.widget, text)
         } catch (t: Throwable) {
             logger.warn("Failed to type into Codex terminal", t)
             false
@@ -253,6 +254,23 @@ class CodexTerminalManager(private val project: Project) {
             val method = widget.javaClass.methods.firstOrNull { it.name == "isCommandRunning" && it.parameterCount == 0 }
             method?.apply { isAccessible = true }?.invoke(widget) as? Boolean
         }.getOrNull()
+    }
+
+    private fun pasteText(widget: TerminalWidget, text: String): Boolean {
+        // Generic typeText/pasteText reflection does not guarantee bracketed-paste semantics.
+        // Only use the raw connector so the final newline stays inside the paste boundaries.
+        val connector = runCatching { widget.ttyConnector }.getOrNull()
+        if (connector == null) {
+            logger.warn("Cannot paste selection: Codex terminal has no raw connector")
+            return false
+        }
+        return runCatching {
+            CodexTerminalPaste.write(text) { connector.write(it) }
+            true
+        }.getOrElse {
+            logger.warn("Failed to paste selection into Codex terminal", it)
+            false
+        }
     }
 
     private fun typeText(widget: TerminalWidget, text: String): Boolean {

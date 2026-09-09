@@ -14,8 +14,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.IconLoader
 
 class SendRangeToCodexAction : AnAction(
-    "Send Selection/Class to Codex",
-    "Send the highlighted range or enclosing class lines to the Codex terminal",
+    "Send File or Selection to Codex",
+    "Insert the current file path, or its line range and selected text, into Codex",
     IconLoader.getIcon("/icons/codex_active.svg", SendRangeToCodexAction::class.java)
 ), DumbAware {
 
@@ -40,7 +40,7 @@ class SendRangeToCodexAction : AnAction(
         )
 
         if (payload == null) {
-            notify(project, "Unable to determine selection or enclosing class", NotificationType.INFORMATION)
+            notify(project, "Unable to determine the current file or selection", NotificationType.INFORMATION)
             return
         }
 
@@ -51,12 +51,15 @@ class SendRangeToCodexAction : AnAction(
             return
         }
 
-        if (!terminalManager.typeIntoActiveCodexTerminal(insertText)) {
-            notify(project, "Failed to send range to Codex terminal", NotificationType.WARNING)
+        if (!terminalManager.typeIntoActiveCodexTerminal(insertText, asPaste = payload.selectedText != null)) {
+            notify(project, "Failed to insert file context into Codex; selection paste requires a compatible terminal", NotificationType.WARNING)
             return
         }
 
-        logger.info("Sent editor range to Codex terminal: $insertText")
+        logger.info(
+            "Sent file context to Codex: path=${payload.relativePath}, " +
+                "range=${payload.lineRange}, selectedChars=${payload.selectedText?.length ?: 0}",
+        )
     }
 
     override fun update(e: AnActionEvent) {
