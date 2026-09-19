@@ -6,16 +6,20 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
+import com.intellij.terminal.frontend.view.TerminalView
+import com.intellij.terminal.frontend.view.TerminalViewSessionState
 import com.intellij.terminal.ui.TerminalWidget
 import com.intellij.ui.content.Content
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 import org.jetbrains.plugins.terminal.TerminalToolWindowFactory
 
 /**
- * Project-level service responsible for managing Codex terminals.
+ * Manages Codex launch sessions and inserts context into the selected visible terminal.
  * Encapsulates lookup, reuse, focus, and command execution logic so actions stay thin.
  */
 @Service(Service.Level.PROJECT)
+@Suppress("UnstableApiUsage")
 class CodexTerminalManager(private val project: Project) {
 
     companion object {
@@ -28,6 +32,12 @@ class CodexTerminalManager(private val project: Project) {
     private val scriptFactory = CommandScriptFactory(project)
 
     private data class CodexTerminal(val widget: TerminalWidget, val content: Content)
+
+    private sealed interface InputTarget {
+        data class Unavailable(val state: TerminalInputState) : InputTarget
+        data class Reworked(val view: TerminalView) : InputTarget
+        data class Classic(val widget: TerminalWidget) : InputTarget
+    }
 
     /**
      * Launches or reuses the Codex terminal for the given command.
@@ -72,27 +82,48 @@ class CodexTerminalManager(private val project: Project) {
     }
 
     /**
-     * Returns true when the Codex terminal tab is currently selected in the terminal tool window.
+     * Inspects the selected terminal without treating lookup failures as a hidden terminal.
+     * Keyboard focus may be in the editor or toolbar; no Codex binding is required.
      */
-    fun isCodexTerminalActive(): Boolean {
+    fun getTerminalInputState(): TerminalInputState {
         return try {
-            val terminalManager = TerminalToolWindowManager.getInstance(project)
-            findDisplayedCodexTerminal(terminalManager) != null
+            inputState(findDisplayedTerminal())
         } catch (t: Throwable) {
-            logger.warn("Failed to inspect Codex terminal active state", t)
-            false
+            logger.warn("Failed to inspect terminal active state", t)
+            TerminalInputState.UNSUPPORTED
         }
     }
 
-    /** Inserts text; selection payloads use bracketed paste to keep newlines inside the draft. */
-    fun typeIntoActiveCodexTerminal(text: String, asPaste: Boolean = false): Boolean {
+    /** Sends text to one selected target, without executing it or falling back to another tab. */
+    fun typeIntoActiveTerminal(text: String, asPaste: Boolean = false): TerminalInsertResult {
         return try {
-            val terminalManager = TerminalToolWindowManager.getInstance(project)
-            val terminal = findDisplayedCodexTerminal(terminalManager) ?: return false
-            if (asPaste) pasteText(terminal.widget, text) else typeText(terminal.widget, text)
+            val target = findDisplayedTerminal()
+            val state = inputState(target)
+            if (state != TerminalInputState.READY) {
+                return TerminalInsertResult.Failed(requireNotNull(state.message))
+            }
+            if (asPaste && text.contains("\u001b[201~")) {
+                return TerminalInsertResult.Failed("The selection contains a terminal paste terminator; no text was sent")
+            }
+
+            when (target) {
+                is InputTarget.Reworked -> {
+                    // The frontend owns encoding and bracketed-paste handling. Do not use
+                    // a raw connector or shouldExecute() for editor context.
+                    target.view.createSendTextBuilder().useBracketedPasteMode().send(text)
+                    TerminalInsertResult.Accepted
+                }
+                is InputTarget.Classic -> {
+                    val sent = if (asPaste) pasteText(target.widget, text) else typeText(target.widget, text)
+                    if (sent) TerminalInsertResult.Accepted else TerminalInsertResult.Failed(
+                        "Failed to write to the current Classic terminal; no other terminal was selected",
+                    )
+                }
+                is InputTarget.Unavailable -> TerminalInsertResult.Failed(requireNotNull(target.state.message))
+            }
         } catch (t: Throwable) {
-            logger.warn("Failed to type into Codex terminal", t)
-            false
+            logger.warn("Failed to type into the current terminal", t)
+            TerminalInsertResult.Failed("Failed to send text to the current terminal; see the IDE log for details")
         }
     }
 
@@ -110,22 +141,45 @@ class CodexTerminalManager(private val project: Project) {
         null
     }
 
-    private fun findDisplayedCodexTerminal(
-        manager: TerminalToolWindowManager
-    ): CodexTerminal? {
-        val terminal = locateCodexTerminal(manager) ?: return null
-        val toolWindow = resolveTerminalToolWindow(manager) ?: return null
-        val selectedContent = toolWindow.contentManager.selectedContent ?: return null
-        if (selectedContent != terminal.content) {
-            return null
+    private fun findDisplayedTerminal(): InputTarget {
+        // Resolve the tool window directly: the old manager only owns Classic sessions.
+        val toolWindow = ToolWindowManager.getInstance(project)
+            .getToolWindow(TerminalToolWindowFactory.TOOL_WINDOW_ID)
+            ?: return InputTarget.Unavailable(TerminalInputState.NO_VISIBLE_TERMINAL)
+        if (!toolWindow.isVisible) {
+            return InputTarget.Unavailable(TerminalInputState.NO_VISIBLE_TERMINAL)
         }
+        val contentManager = toolWindow.contentManager
+        val selectedContent = contentManager.selectedContent
+            ?: return InputTarget.Unavailable(
+                if (contentManager.isEmpty) TerminalInputState.NO_VISIBLE_TERMINAL else TerminalInputState.NOT_READY,
+            )
 
-        val isDisplayed = toolWindow.isVisible
-        if (!isDisplayed) {
-            return null
+        val tab = TerminalToolWindowTabsManager.getInstance(project).tabs
+            .firstOrNull { it.content === selectedContent }
+        if (tab != null) {
+            return InputTarget.Reworked(tab.view)
         }
+        val widget = TerminalToolWindowManager.findWidgetByContent(selectedContent)
+        return if (widget != null) InputTarget.Classic(widget)
+        else InputTarget.Unavailable(TerminalInputState.UNSUPPORTED)
+    }
 
-        return terminal
+    private fun inputState(target: InputTarget): TerminalInputState = when (target) {
+        is InputTarget.Unavailable -> target.state
+        is InputTarget.Reworked -> when (target.view.sessionState.value) {
+            TerminalViewSessionState.Running -> TerminalInputState.READY
+            TerminalViewSessionState.Terminated -> TerminalInputState.TERMINATED
+            else -> TerminalInputState.NOT_READY
+        }
+        is InputTarget.Classic -> {
+            val connector = target.widget.ttyConnector
+            when {
+                connector == null -> TerminalInputState.NOT_READY
+                !connector.isConnected -> TerminalInputState.TERMINATED
+                else -> TerminalInputState.READY
+            }
+        }
     }
 
     private fun focusCodexTerminal(
@@ -261,14 +315,14 @@ class CodexTerminalManager(private val project: Project) {
         // Only use the raw connector so the final newline stays inside the paste boundaries.
         val connector = runCatching { widget.ttyConnector }.getOrNull()
         if (connector == null) {
-            logger.warn("Cannot paste selection: Codex terminal has no raw connector")
+            logger.warn("Cannot paste selection: current terminal has no raw connector")
             return false
         }
         return runCatching {
             CodexTerminalPaste.write(text) { connector.write(it) }
             true
         }.getOrElse {
-            logger.warn("Failed to paste selection into Codex terminal", it)
+            logger.warn("Failed to paste selection into the current terminal", it)
             false
         }
     }
@@ -280,7 +334,7 @@ class CodexTerminalManager(private val project: Project) {
                 connector.write(text)
                 true
             }.getOrElse {
-                logger.warn("Failed to write to Codex terminal connector", it)
+                logger.warn("Failed to write to terminal connector", it)
                 false
             }
         }
@@ -293,7 +347,7 @@ class CodexTerminalManager(private val project: Project) {
                 typeMethod.invoke(widget, text)
                 true
             }.getOrElse {
-                logger.warn("Failed to invoke typeText on Codex terminal", it)
+                logger.warn("Failed to invoke typeText on terminal", it)
                 false
             }
         }
@@ -305,7 +359,7 @@ class CodexTerminalManager(private val project: Project) {
                 pasteMethod.invoke(widget, text)
                 true
             }.getOrElse {
-                logger.warn("Failed to invoke pasteText on Codex terminal", it)
+                logger.warn("Failed to invoke pasteText on terminal", it)
                 false
             }
         }

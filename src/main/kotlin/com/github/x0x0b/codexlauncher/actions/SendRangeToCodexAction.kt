@@ -1,6 +1,8 @@
 package com.github.x0x0b.codexlauncher.actions
 
 import com.github.x0x0b.codexlauncher.terminal.CodexTerminalManager
+import com.github.x0x0b.codexlauncher.terminal.TerminalInputState
+import com.github.x0x0b.codexlauncher.terminal.TerminalInsertResult
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnAction
@@ -14,8 +16,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.IconLoader
 
 class SendRangeToCodexAction : AnAction(
-    "Send File or Selection to Codex",
-    "Insert the current file path, or its line range and selected text, into Codex",
+    "Send File or Selection to Current Terminal",
+    "Insert the current file path, or its line range and selected text, into the selected visible terminal",
     IconLoader.getIcon("/icons/codex_active.svg", SendRangeToCodexAction::class.java)
 ), DumbAware {
 
@@ -46,18 +48,14 @@ class SendRangeToCodexAction : AnAction(
 
         val insertText = InsertPayloadResolver.formatInsertText(payload)
         val terminalManager = project.service<CodexTerminalManager>()
-        if (!terminalManager.isCodexTerminalActive()) {
-            notify(project, "Launch Codex first to send ranges", NotificationType.INFORMATION)
-            return
-        }
-
-        if (!terminalManager.typeIntoActiveCodexTerminal(insertText, asPaste = payload.selectedText != null)) {
-            notify(project, "Failed to insert file context into Codex; selection paste requires a compatible terminal", NotificationType.WARNING)
+        val result = terminalManager.typeIntoActiveTerminal(insertText, asPaste = payload.selectedText != null)
+        if (result is TerminalInsertResult.Failed) {
+            notify(project, result.message, NotificationType.WARNING)
             return
         }
 
         logger.info(
-            "Sent file context to Codex: path=${payload.relativePath}, " +
+            "Queued file context for the current terminal: path=${payload.relativePath}, " +
                 "range=${payload.lineRange}, selectedChars=${payload.selectedText?.length ?: 0}",
         )
     }
@@ -72,7 +70,7 @@ class SendRangeToCodexAction : AnAction(
         }
 
         val terminalManager = project.service<CodexTerminalManager>()
-        if (!terminalManager.isCodexTerminalActive()) {
+        if (terminalManager.getTerminalInputState() == TerminalInputState.NO_VISIBLE_TERMINAL) {
             e.presentation.isEnabledAndVisible = false
             return
         }

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.x0x0b"
-version = "1.1.18.1"
+version = "1.1.18.2"
 
 repositories {
     mavenCentral()
@@ -25,8 +25,9 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.junit.vintage:junit-vintage-engine")
     intellijPlatform {
-        intellijIdeaUltimate("2025.3")
+        rider("2026.1.5")
         bundledPlugin("org.jetbrains.plugins.terminal")
+        bundledModule("intellij.terminal.frontend")
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
 }
@@ -34,11 +35,13 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "242"
+            sinceBuild = "261"
         }
 
         changeNotes = """
-            Insert selected editor text with its file path and line range into Codex as a multiline paste, without submitting.
+            Require Rider or a compatible JetBrains IDE 2026.1 or later.
+            Support file and selection input into manually opened Reworked terminals as well as Classic terminals.
+            Report unavailable terminal sessions without opening a new Codex tab. Toolbar right-click still opens or focuses Codex.
         """.trimIndent()
     }
     publishing {
